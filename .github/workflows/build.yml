@@ -29,7 +29,7 @@ jobs:
     outputs:
       points: ${{ steps.end.outputs.points}}
     container:
-      image: duskmoon/dev-env:rcore-ci
+      image: alicesama/rcore-ci:2024a
     steps:
       - uses: actions/checkout@v4
       - name: Run tests
