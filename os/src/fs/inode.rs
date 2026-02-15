@@ -53,6 +53,24 @@ impl OSInode {
         }
         v
     }
+    /// Get file stat
+    pub fn fstat(&self) -> super::Stat {
+        let inner = self.inner.exclusive_access();
+        let (nlink, _size, mode) = inner.inode.get_disk_inode_info();
+        let (block_id, block_offset) = inner.inode.get_inode_id();
+        let ino = (block_id as u64) << 32 | block_offset as u64;
+        super::Stat {
+            dev: 0,
+            ino,
+            mode: if mode == 1 {
+                super::StatMode::DIR
+            } else {
+                super::StatMode::FILE
+            },
+            nlink,
+            pad: [0; 7],
+        }
+    }
 }
 
 lazy_static! {
@@ -125,6 +143,16 @@ pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
     }
 }
 
+/// Link a file
+pub fn link_file(old_name: &str, new_name: &str) -> isize {
+    ROOT_INODE.link(old_name, new_name)
+}
+
+/// Unlink a file
+pub fn unlink_file(name: &str) -> isize {
+    ROOT_INODE.unlink(name)
+}
+
 impl File for OSInode {
     fn readable(&self) -> bool {
         self.readable
@@ -155,5 +183,8 @@ impl File for OSInode {
             total_write_size += write_size;
         }
         total_write_size
+    }
+    fn fstat(&self) -> super::Stat {
+        self.fstat()
     }
 }
