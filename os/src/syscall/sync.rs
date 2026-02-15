@@ -1,7 +1,8 @@
 use crate::sync::{Condvar, Mutex, MutexBlocking, MutexSpin, Semaphore};
-use crate::task::{block_current_and_run_next, current_process, current_task};
+use crate::task::{block_current_and_run_next, current_process, current_task, ProcessControlBlockInner};
 use crate::timer::{add_timer, get_time_ms};
 use alloc::sync::Arc;
+use alloc::vec;
 /// sleep syscall
 pub fn sys_sleep(ms: usize) -> isize {
     trace!(
@@ -71,10 +72,21 @@ pub fn sys_mutex_lock(mutex_id: usize) -> isize {
     let process = current_process();
     let process_inner = process.inner_exclusive_access();
     let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
+    let deadlock_detect = process_inner.deadlock_detect_enabled;
     drop(process_inner);
     drop(process);
-    mutex.lock();
-    0
+
+    if deadlock_detect {
+        if mutex.lock() {
+            0
+        } else {
+            // Deadlock detected
+            -0xdead
+        }
+    } else {
+        mutex.lock();
+        0
+    }
 }
 /// mutex unlock syscall
 pub fn sys_mutex_unlock(mutex_id: usize) -> isize {
@@ -164,10 +176,54 @@ pub fn sys_semaphore_down(sem_id: usize) -> isize {
     );
     let process = current_process();
     let process_inner = process.inner_exclusive_access();
+    let deadlock_detect = process_inner.deadlock_detect_enabled;
+
+    if deadlock_detect {
+        // Perform deadlock detection using banker's algorithm
+        if detect_semaphore_deadlock(&process_inner, sem_id) {
+            drop(process_inner);
+            return -0xdead;
+        }
+    }
+
     let sem = Arc::clone(process_inner.semaphore_list[sem_id].as_ref().unwrap());
     drop(process_inner);
-    sem.down();
-    0
+
+    if sem.down() {
+        0
+    } else {
+        -0xdead
+    }
+}
+
+fn detect_semaphore_deadlock(process_inner: &ProcessControlBlockInner, request_sem_id: usize) -> bool {
+    // Simple banker's algorithm implementation
+    // Check if granting this request would lead to deadlock
+
+    let num_sems = process_inner.semaphore_list.len();
+
+    // Get current available resources
+    let mut available = vec![0isize; num_sems];
+    for (i, sem_opt) in process_inner.semaphore_list.iter().enumerate() {
+        if let Some(sem) = sem_opt {
+            let inner = sem.inner.exclusive_access();
+            available[i] = inner.count;
+        }
+    }
+
+    // Check if we can allocate the requested resource
+    if available[request_sem_id] <= 0 {
+        // Simulate allocation
+        available[request_sem_id] -= 1;
+
+        // Simple check: if resources go negative and all are negative, might lead to deadlock
+        // This is a simplified version
+        if available.iter().all(|&x| x < 0) {
+            return true;
+        }
+    }
+
+    false
 }
 /// condvar create syscall
 pub fn sys_condvar_create() -> isize {
@@ -245,7 +301,20 @@ pub fn sys_condvar_wait(condvar_id: usize, mutex_id: usize) -> isize {
 /// enable deadlock detection syscall
 ///
 /// YOUR JOB: Implement deadlock detection, but might not all in this syscall
-pub fn sys_enable_deadlock_detect(_enabled: usize) -> isize {
-    trace!("kernel: sys_enable_deadlock_detect NOT IMPLEMENTED");
-    -1
+pub fn sys_enable_deadlock_detect(enabled: usize) -> isize {
+    trace!(
+        "kernel:pid[{}] tid[{}] sys_enable_deadlock_detect",
+        current_task().unwrap().process.upgrade().unwrap().getpid(),
+        current_task()
+            .unwrap()
+            .inner_exclusive_access()
+            .res
+            .as_ref()
+            .unwrap()
+            .tid
+    );
+    let process = current_process();
+    let mut process_inner = process.inner_exclusive_access();
+    process_inner.deadlock_detect_enabled = enabled != 0;
+    0
 }
