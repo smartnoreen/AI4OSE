@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "spinlock_lab"
+name = "sleep_lock_lab"
 version = "0.1.0"

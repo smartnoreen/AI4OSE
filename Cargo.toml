@@ -1,11 +1,10 @@
 [package]
-name = "spinlock_lab"
+name = "sleep_lock_lab"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "spinlock_lab"
+name = "sleep_lock_lab"
 path = "src/lib.rs"
 
 [dependencies]
-
